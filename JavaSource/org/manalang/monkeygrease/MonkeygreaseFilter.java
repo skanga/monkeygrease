@@ -1,43 +1,46 @@
 /**
  * Monkeygrease
- * Copyright (C) 2005-2006 Rich Manalang
+ * Copyright (C) 2005 Rich Manalang
  * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy 
- * of this software and associated documentation files (the "Software"), to deal 
- * in the Software without restriction, including without limitation the rights 
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell 
- * copies of the Software, and to permit persons to whom the Software is 
- * furnished to do so, subject to the following conditions:
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation; either version 2 of the License, or (at your option) any later
+ * version.
  * 
- * The above copyright notice and this permission notice shall be included in 
- * all copies or substantial portions of the Software.
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+ * details.
  * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
- * SOFTWARE.
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 package org.manalang.monkeygrease;
 
 import java.io.File;
 import java.io.IOException;
+import java.text.DateFormat;
+import java.util.Date;
+import java.util.Iterator;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
+import javax.servlet.ServletOutputStream;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
-import org.apache.commons.httpclient.HttpClient;
+import org.manalang.monkeygrease.utils.InsertAt;
 import org.manalang.monkeygrease.utils.LogFormatter;
 import org.manalang.monkeygrease.utils.MonkeygreaseResponseWrapper;
 
@@ -100,7 +103,7 @@ import org.manalang.monkeygrease.utils.MonkeygreaseResponseWrapper;
  * </p>
  * 
  * @author Rich Manalang
- * @version 0.20 Build 308 Sep 22, 2006 18:03 GMT
+ * @version 0.11 Build 249 Nov 07, 2005 19:21 GMT
  */
 public class MonkeygreaseFilter implements Filter {
 
@@ -136,17 +139,13 @@ public class MonkeygreaseFilter implements Filter {
 
 	private long confReloadLastCheck;
 
-	private static FileHandler fh;
-
-	public static long confLastLoad;
-
-	public static HttpClient client;
+	private long confLastLoad;
 
 	public static boolean COMMENTS_ON;
 
 	public static Logger log = Logger.getLogger("org.manalang.monkeygrease");
 
-	public static String remoteConfigURL;
+	private static FileHandler fh;
 
 	/**
 	 * Initializes Monkeygrease. Internal servlet filter method.
@@ -157,7 +156,7 @@ public class MonkeygreaseFilter implements Filter {
 	public void init(FilterConfig filterConfig) throws ServletException {
 
 		try {
-			fh = new FileHandler("monkeygrease_%u.log");
+			fh = new FileHandler("monkeygrease%u.log");
 		} catch (SecurityException e) {
 			e.printStackTrace();
 		} catch (IOException e) {
@@ -179,9 +178,6 @@ public class MonkeygreaseFilter implements Filter {
 			logLevelInt = Integer.parseInt(logLevel);
 		else
 			logLevelInt = 0;
-		remoteConfigURL = fc.getInitParameter("remoteConfigURL");
-		if (remoteConfigURL != "" && remoteConfigURL != null)
-			client = new HttpClient();
 
 		switch (logLevelInt) {
 		case SEVERE:
@@ -233,6 +229,14 @@ public class MonkeygreaseFilter implements Filter {
 	}
 
 	/**
+	 * Destroys filter. Internal servlet filter method.
+	 */
+	public void destroy() {
+		fc = null;
+		fh.close();
+	}
+
+	/**
 	 * Main filter process. Internal servlet filter method.
 	 * 
 	 * @param request
@@ -243,64 +247,38 @@ public class MonkeygreaseFilter implements Filter {
 	 */
 	public void doFilter(ServletRequest request, ServletResponse response,
 			FilterChain chain) throws IOException, ServletException {
-		
 		if (fc == null)
-			return;
-
-		HttpServletRequest hreq = (HttpServletRequest) request;
-
-		// Exit if request is for XHR proxy servlet
-		if (hreq.getRequestURI().equals("/monkeygreaseproxy"))
 			return;
 
 		log.info("*** Request Processing Begins ***");
 
-		// Check to see if config file needs to be loaded
-		reloadConfig();
+		// Capture the stream which writes response to the client
+		ServletOutputStream out = response.getOutputStream();
 
 		// Create response wrapper so we can modify the original response
 		MonkeygreaseResponseWrapper wrappedResponse = new MonkeygreaseResponseWrapper(
-				hreq, response, rules);
-
-		// Exit if original response has a Content-Encoding header...
-		// this prevents Monkeygrease from processing gzipped content.
-		// There doesn't seem to be a way to get the actual value of
-		// a response header... need to look into this more.
-		if (wrappedResponse.containsHeader("Content-Encoding"))
-			return;
+				(HttpServletResponse) response);
 
 		// Process request, return response to wrappedResponse
 		chain.doFilter(request, wrappedResponse);
 
 		// Make sure we only process HTML content
 		String ct = wrappedResponse.getContentType();
-		MonkeygreaseFilter.log.fine("Request content type: " + ct);
-		if (ct == null || ct.indexOf("text/html") == -1)
-			return;
-		
-		wrappedResponse.getOutputStream().close();
 
-		log.info("*** Request Processing Ends ***");
+		log.fine("Request content type: " + ct);
+		if (ct != null && ct.indexOf("text/html") != -1) {
 
-	}
+			// check to see if the conf needs reloading
+			long now = System.currentTimeMillis();
+			if (confReloadCheckEnabled && !confReloadInProgress
+					&& (now - confReloadCheckInterval) > confReloadLastCheck) {
+				confReloadInProgress = true;
+				confReloadLastCheck = now;
 
-	/**
-	 * Reloads Monkeygrease config file if needed
-	 */
-	private void reloadConfig() {
-		// check to see if the rules needs reloading
-		long now = System.currentTimeMillis();
-		if (confReloadCheckEnabled && !confReloadInProgress
-				&& (now - confReloadCheckInterval) > confReloadLastCheck) {
-			confReloadInProgress = true;
-			confReloadLastCheck = now;
-
-			log.fine("starting conf reload check");
-
-			if (remoteConfigURL == "") {
+				log.fine("starting conf reload check");
 				long confFileCurrentTime = getConfFileLastModified();
 				if (confLastLoad < confFileCurrentTime) {
-					// reload rules
+					// reload conf
 					confLastLoad = System.currentTimeMillis();
 					log.config("Conf file modified since last load, reloading");
 					cf.load();
@@ -308,28 +286,171 @@ public class MonkeygreaseFilter implements Filter {
 				} else {
 					log.config("Conf is not modified");
 				}
-			} else {
-				log.config("Conf file reloading from remote URL");
-				cf.load();
-				rules = cf.getRules();
+
+				confReloadInProgress = false;
 			}
 
-			confReloadInProgress = false;
-		}
+			// don't process if no rules available
+			if (rules == null) {
+				out.write(wrappedResponse.getData());
+				out.close();
+				return;
+			}
 
-		log.info("Number of rules loaded: " + rules.size());
-	}
+			HttpServletRequest hreq = (HttpServletRequest) request;
 
-	/**
-	 * Destroys filter. Internal servlet filter method.
-	 */
-	public void destroy() {
-		fc = null;
-		fh.close();
+			log.info("Number of rules loaded: " + rules.size());
+
+			// filter rules based on request url
+			Rules rulesToApply = new Rules();
+			Iterator rulesIter = rules.iterator();
+			while (rulesIter.hasNext()) {
+				Rule rule = (Rule) rulesIter.next();
+				log.info("Rule being evaluated: " + rule.getName());
+				String uri = hreq.getRequestURI();
+				String qry = hreq.getQueryString();
+				String url = (qry != null) ? (uri + "?" + qry) : uri;
+
+				log.info("Request URL to match: " + url);
+
+				Pattern p = rule.getPattern();
+				Matcher m = p.matcher(url);
+				if (!m.matches()) {
+					log.info("Request URL doesn't match pattern");
+				} else {
+					rulesToApply.add(rule);
+					log
+							.info("Request URL matches... adding rule to rulesToApply");
+				}
+			}
+			log.info("Number of rules to apply: " + rulesToApply.size());
+
+			// Don't bother processing if no rules apply
+			if (rulesToApply.size() == 0) {
+				out.write(wrappedResponse.getData());
+				out.close();
+				return;
+			}
+
+			// Process response
+			String strResponse = new String((wrappedResponse.getData()));
+			String newResponse = processResponse(strResponse, rulesToApply);
+
+			// Reset content length header based on modified response
+			wrappedResponse.setContentLength(newResponse.length());
+
+			// write the modified response back out through the original
+			// response stream
+			out.write(newResponse.getBytes());
+		} else
+			// if not text/html write out original response
+			out.write(wrappedResponse.getData());
+
+		// finally, close the response writer
+		out.close();
+		log.info("*** Request Processing Ends ***");
 	}
 
 	private long getConfFileLastModified() {
 		File confFile = new File(sc.getRealPath(cf.getDEFAULT_WEB_CONF_FILE()));
 		return confFile.lastModified();
+	}
+
+	/**
+	 * Processes response rules. Returns the response as a string with rules
+	 * applied.
+	 * 
+	 * @param sResponse
+	 * @return Modified response string based on rules applied
+	 */
+	public String processResponse(String strResponse, Rules rulesToApply) {
+		String tagsToInsert = "";
+		String modResponse = strResponse;
+
+		Iterator rulesToApplyIter = rulesToApply.iterator();
+		while (rulesToApplyIter.hasNext()) {
+			Rule ruleToApply = (Rule) rulesToApplyIter.next();
+			tagsToInsert = ruleToApply.toString();
+			switch (ruleToApply.getInsertAt()) {
+			case InsertAt.HEAD_BEGIN:
+				if (tagsToInsert != "") {
+					tagsToInsert = "<head>\n" + tagsToInsert;
+					modResponse = findAndReplace(tagsToInsert, modResponse,
+							"<head>");
+					log.fine("<head> found... inserting rule");
+				} else {
+					log.fine("No <head> found");
+				}
+				break;
+
+			case InsertAt.HEAD_END:
+				if (tagsToInsert != "") {
+					tagsToInsert += "</head>";
+					modResponse = findAndReplace(tagsToInsert, modResponse,
+							"</head>");
+					log.fine("</head> found... inserting rule");
+				} else {
+					log.fine("No </head> found");
+				}
+				break;
+
+			case InsertAt.BODY_BEGIN:
+				if (tagsToInsert != "") {
+					Pattern p = Pattern.compile("<body[^>]*>",
+							Pattern.CASE_INSENSITIVE | Pattern.MULTILINE
+									| Pattern.DOTALL);
+					Matcher m = p.matcher(modResponse);
+					StringBuffer sb = new StringBuffer();
+					while (m.find()) {
+						String origBody = m.group();
+						if (origBody != null) {
+							// make sure we replace any dollar signs that may be
+							// in the body content... else appendReplacement
+							// will interpret them as insertion points
+							m.appendReplacement(sb, origBody.replaceAll("\\$",
+									"\\\\\\$")
+									+ "\n" + tagsToInsert);
+							break;
+						}
+					}
+					m.appendTail(sb);
+					modResponse = sb.toString();
+					log.fine("<body> found... inserting rule");
+				} else {
+					log.fine("No <body> found");
+				}
+				break;
+
+			case InsertAt.BODY_END:
+				if (tagsToInsert != "") {
+					tagsToInsert += "\n</body>";
+					modResponse = findAndReplace(tagsToInsert, modResponse,
+							"</body>");
+					log.fine("</body> found... inserting rule");
+				} else {
+					log.fine("No </body> found");
+				}
+				break;
+			}
+		}
+
+		DateFormat df = DateFormat.getDateTimeInstance(DateFormat.MEDIUM,
+				DateFormat.LONG);
+
+		if (COMMENTS_ON) {
+			modResponse = "<!-- This page has been Monkeygrease'd (Config file last loaded on "
+					+ df.format(new Date(confLastLoad))
+					+ ") -->\n"
+					+ modResponse;
+		}
+		return modResponse;
+	}
+
+	private String findAndReplace(String tagsToInsert, String modResponse,
+			String strPattern) {
+		Pattern p = Pattern.compile(strPattern, Pattern.CASE_INSENSITIVE);
+		Matcher m = p.matcher(modResponse);
+		modResponse = m.replaceFirst(tagsToInsert);
+		return modResponse;
 	}
 }

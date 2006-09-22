@@ -8,7 +8,6 @@
 		<!-- Include all elements that Tomcat exposes to applications -->
 		<fileset file="${java.home}/lib/*.jar" />
 		<fileset file="${tomcat.home}/common/lib/servlet-api.jar" />
-		<fileset file="${httpclient.home}/*.jar" />
 	</path>
 	<target name="init">
 		<tstamp />
@@ -25,17 +24,17 @@
 	</target>
 	<target name="compile" description="Compile Java source files" depends="init">
 		<replaceregexp match="@version.*" replace="@version ${app.version} Build ${build.number} ${now}">
-			<fileset dir="src">
+			<fileset dir="JavaSource">
 				<include name="**/*.java" />
 			</fileset>
 		</replaceregexp>
 		<replaceregexp match="@author.*" replace="@author ${app.author}">
-			<fileset dir="src">
+			<fileset dir="JavaSource">
 				<include name="**/*.java" />
 			</fileset>
 		</replaceregexp>
-		<javac destdir="${output.dir}/classes"  classpathref="classpath" debug="${javac.debug}" nowarn="${javac.nowarn}" deprecation="${javac.deprecation}" encoding="Cp1252">
-			<src path="src" />
+		<javac destdir="${output.dir}/classes" classpathref="classpath" debug="${javac.debug}" nowarn="${javac.nowarn}" deprecation="${javac.deprecation}" encoding="Cp1252">
+			<src path="JavaSource" />
 		</javac>
 		<manifest file="${output.dir}/classes/META-INF/manifest.mf">
 			<attribute name="Built-By" value="${user.name}" />
@@ -59,23 +58,21 @@
 		</copy>
 	</target>
 	<target name="javadoc">
-		<javadoc access="public" author="true" classpath="classpath" destdir="${output.dir}/api" doctitle="Monkeygrease" nodeprecated="false" nodeprecatedlist="false" noindex="false" nonavbar="false" notree="false" packagenames="org.manalang.monkeygrease,org.manalang.monkeygrease.utils" source="1.5" sourcepath="src" splitindex="true" use="true" version="true" />
+		<javadoc access="public" author="true" classpath="classpath" destdir="${output.dir}/api" doctitle="Monkeygrease" nodeprecated="false" nodeprecatedlist="false" noindex="false" nonavbar="false" notree="false" packagenames="org.manalang.monkeygrease,org.manalang.monkeygrease.utils" source="1.5" sourcepath="JavaSource" splitindex="true" use="true" version="true" />
 	</target>
 	<target name="dist-bin">
-		<mkdir dir="${output.dir}/dist/bin/monkeygrease" />
-		<copy file="${output.dir}/WEB-INF/lib/monkeygrease.jar" todir="${output.dir}/dist/bin/monkeygrease" />
-		<copy todir="${output.dir}/dist/bin/monkeygrease">
-			<fileset dir="${output.dir}/WEB-INF/lib/" includes="*.jar" />
-		</copy>
-		<copy file="${basedir}/WebContent/WEB-INF/monkeygrease.xml" todir="${output.dir}/dist/bin/monkeygrease" />
-		<copy file="${basedir}/LICENSE.txt" todir="${output.dir}/dist/bin/monkeygrease" />
+		<mkdir dir="${output.dir}/dist/bin" />
+		<copy file="${output.dir}/WEB-INF/lib/monkeygrease.jar" todir="${output.dir}/dist/bin" />
+		<copy file="${basedir}/WebContent/WEB-INF/monkeygrease.xsd" todir="${output.dir}/dist/bin" />
+		<copy file="${basedir}/WebContent/WEB-INF/monkeygrease.xml" todir="${output.dir}/dist/bin" />
+		<copy file="${basedir}/LICENSE.txt" todir="${output.dir}/dist/bin" />
 		<zip destfile="${output.dir}/dist/bin/${app.name}-${app.version}.zip">
 			<fileset dir="${output.dir}/dist/bin" excludes="${app.name}-${app.version}.zip" />
 		</zip>
 		<tar basedir="${output.dir}/dist/bin" compression="gzip" destfile="${output.dir}/dist/bin/${app.name}-${app.version}.tar.gz" excludes="${app.name}-${app.version}.zip" />
 		<checksum file="${output.dir}/dist/bin/${app.name}-${app.version}.zip" fileext=".md5.txt" />
 		<checksum file="${output.dir}/dist/bin/${app.name}-${app.version}.tar.gz" fileext=".md5.txt" />
-		<delete includeemptydirs="true">
+		<delete>
 			<fileset dir="${output.dir}/dist/bin">
 				<exclude name="**/*.zip" />
 				<exclude name="**/*.tar.gz" />
@@ -84,31 +81,31 @@
 		</delete>
 	</target>
 	<target name="dist-src">
-		<copy todir="${output.dir}/dist/src/monkeygrease/api">
+		<copy todir="${output.dir}/dist/src/api">
 			<fileset dir="${output.dir}/api" />
 		</copy>
-		<copy todir="${output.dir}/dist/src/monkeygrease/java">
-			<fileset dir="${basedir}/src" />
+		<copy todir="${output.dir}/dist/src/java">
+			<fileset dir="${basedir}/JavaSource" />
 		</copy>
-		<copy todir="${output.dir}/dist/src/monkeygrease/WEB-INF">
+		<copy todir="${output.dir}/dist/src/WEB-INF">
 			<fileset dir="${output.dir}/WEB-INF" />
 		</copy>
-		<copy todir="${output.dir}/dist/src/monkeygrease">
+		<copy todir="${output.dir}/dist/src">
 			<fileset dir="${basedir}">
-				<include name="build.*" />
-				<include name="LICENSE.txt" />
+				<include name="build.*"/>
+				<include name="LICENSE.txt"/>
 			</fileset>
 		</copy>
 		<zip destfile="${output.dir}/dist/src/${app.name}-${app.version}.src.zip">
 			<fileset dir="${output.dir}/dist/src" excludes="${app.name}-${app.version}.zip" />
 		</zip>
-		<tar basedir="${output.dir}/dist/src" compression="gzip" destfile="${output.dir}/dist/src/${app.name}-${app.version}.src.tar.gz" excludes="${app.name}-${app.version}.src.zip" />
+		<tar basedir="${output.dir}/dist/src" compression="gzip"  destfile="${output.dir}/dist/src/${app.name}-${app.version}.src.tar.gz" excludes="${app.name}-${app.version}.src.zip" />
 		<checksum file="${output.dir}/dist/src/${app.name}-${app.version}.src.zip" fileext=".md5.txt" />
 		<checksum file="${output.dir}/dist/src/${app.name}-${app.version}.src.tar.gz" fileext=".md5.txt" />
-		<delete includeemptydirs="true" dir="${output.dir}/dist/src/monkeygrease/api" />
-		<delete includeemptydirs="true" dir="${output.dir}/dist/src/monkeygrease/java" />
-		<delete includeemptydirs="true" dir="${output.dir}/dist/src/monkeygrease/WEB-INF" />
-		<delete includeemptydirs="true">
+		<delete includeemptydirs="true" dir="${output.dir}/dist/src/api" />
+		<delete includeemptydirs="true" dir="${output.dir}/dist/src/java" />
+		<delete includeemptydirs="true" dir="${output.dir}/dist/src/WEB-INF" />
+		<delete>
 			<fileset dir="${output.dir}/dist/src">
 				<exclude name="**/*.zip" />
 				<exclude name="**/*.tar.gz" />
@@ -124,7 +121,7 @@
 	<target name="copy-to-scm-dir">
 		<copy todir="${scm.dir}">
 			<fileset dir="${basedir}">
-				<include name="src/**/*.java" />
+				<include name="JavaSource/**/*.java" />
 				<include name="WebContent/**/*" />
 				<include name="*" />
 				<exclude name=".*" />
