@@ -23,109 +23,70 @@
 package org.manalang.monkeygrease.utils;
 
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.Iterator;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import javax.servlet.ServletOutputStream;
-import javax.servlet.ServletResponse;
-import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpServletResponseWrapper;
 
-import org.manalang.monkeygrease.MonkeygreaseFilter;
-import org.manalang.monkeygrease.Rule;
-import org.manalang.monkeygrease.Rules;
 
 /**
- * MonkeygreaseResponseWrapper is used as a wrapper to capture the original
- * response object in the Monkeygrease filter. The rules to be applied are also
- * processed in this class.
+ * GenericResponseWrapper is used as a wrapper to capture the original
+ * response object in the Monkeygrease filter.
  * 
  * @author Rich Manalang
- * @version 0.20 Build 308 Sep 22, 2006 18:03 GMT
+ * @version 0.13 Build 294 Apr 12, 2006 02:40 GMT
  */
-public class MonkeygreaseResponseWrapper extends HttpServletResponseWrapper {
-	private ByteArrayOutputStream output;
+public class MonkeygreaseResponseWrapper
+   extends HttpServletResponseWrapper
+{
+  private ByteArrayOutputStream output;
 
-	private PrintWriter mgWriter;
+  private int contentLength;
 
-	private MonkeygreaseStream mgStream;
+  private String contentType;
 
-	private int contentLength;
+  public MonkeygreaseResponseWrapper(HttpServletResponse response)
+  {
+    super(response);
+    output = new ByteArrayOutputStream();
+  }
 
-	private String contentType;
+  public byte[] getData()
+  {
+    return output.toByteArray();
+  }
 
-	private Rules rulesToApply;
+  public ServletOutputStream getOutputStream()
+  {
+    return new FilterServletOutputStream(output);
+  }
 
-	public MonkeygreaseResponseWrapper(HttpServletRequest hreq,
-			ServletResponse resp, Rules rules) throws IOException {
-		super((HttpServletResponse) resp);
+  public void setContentLength(int length)
+  {
+    this.contentLength = length;
+    super.setContentLength(length);
+  }
 
-		// filter rules based on request url
-		rulesToApply = new Rules();
-		Iterator rulesIter = rules.iterator();
-		while (rulesIter.hasNext()) {
-			Rule rule = (Rule) rulesIter.next();
-			MonkeygreaseFilter.log.info("Rule being evaluated: "
-					+ rule.getName());
-			String uri = hreq.getRequestURI();
-			String qry = hreq.getQueryString();
-			String url = (qry != null) ? (uri + "?" + qry) : uri;
+  public int getContentLength()
+  {
+    return contentLength;
+  }
 
-			MonkeygreaseFilter.log.info("Request URL to match: " + url);
+  public String getContentType()
+  {
+    return contentType;
+  }
 
-			Pattern p = rule.getPattern();
-			Matcher m = p.matcher(url);
-			if (!m.matches()) {
-				MonkeygreaseFilter.log
-						.info("Request URL doesn't match pattern");
-			} else {
-				rulesToApply.add(rule);
-				MonkeygreaseFilter.log
-						.info("Request URL matches... adding rule to rulesToApply");
-			}
-		}
-		MonkeygreaseFilter.log.info("Number of rules to apply: "
-				+ rulesToApply.size());
+  public void setContentType(String type)
+  {
+    this.contentType = type;
+    super.setContentType(type);
+  }
 
-		// Process response
-		mgStream = new MonkeygreaseStream(resp.getOutputStream(), rulesToApply,
-				this);
-		mgWriter = new PrintWriter(mgStream);
-
-	}
-
-	public byte[] getData() {
-		return output.toByteArray();
-	}
-
-	public ServletOutputStream getOutputStream() {
-		return mgStream;
-	}
-
-	public PrintWriter getWriter() throws IOException {
-		return mgWriter;
-	}
-
-	public void setContentLength(int length) {
-		this.contentLength = length;
-		super.setContentLength(length);
-	}
-
-	public int getContentLength() {
-		return contentLength;
-	}
-
-	public String getContentType() {
-		return contentType;
-	}
-
-	public void setContentType(String type) {
-		this.contentType = type;
-		super.setContentType(type);
-	}
+  public PrintWriter getWriter()
+  {
+    return new PrintWriter(getOutputStream(), true);
+  }
 
 }
